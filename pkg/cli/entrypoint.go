@@ -15,6 +15,11 @@ import (
 	"github.com/spf13/viper"
 )
 
+type ProxyConfig struct {
+	Host string
+	Port int
+}
+
 type Config struct {
 	Host          string
 	Port          int
@@ -26,6 +31,7 @@ type Config struct {
 	Key           string
 	Cacert        string
 	TLSSkipVerify bool
+	Proxy         *ProxyConfig
 }
 
 func getConfiguration() Config {
@@ -47,6 +53,29 @@ func getConfiguration() Config {
 
 	}
 
+	// Check if proxies exist
+	// i.e.
+	// proxies:
+	//   beta:
+	//      host: beta.example.com
+	//      port: 9200
+	var proxyCfg *ProxyConfig
+
+	// which proxy to use
+	proxy := v.GetString("proxy")
+	if proxy != "" {
+		// if proxy is set, use it
+		proxyConfig := viper.Sub("proxies." + proxy)
+		if proxyConfig == nil {
+			fmt.Printf("Could not retrieve configuration for proxy \"%s\"\n", proxy)
+			os.Exit(1)
+		}
+		proxyCfg = &ProxyConfig{
+			Host: proxyConfig.GetString("host"),
+			Port: proxyConfig.GetInt("port"),
+		}
+	}
+
 	config := Config{
 		Host:     v.GetString("host"),
 		Port:     v.GetInt("port"),
@@ -61,6 +90,8 @@ func getConfiguration() Config {
 		Cacert: v.GetString("cacert"),
 
 		TLSSkipVerify: v.GetBool("skipverify"),
+
+		Proxy: proxyCfg,
 	}
 
 	return config
@@ -74,6 +105,12 @@ func getClient() *vulcanizer.Client {
 		c.Host,
 		c.Port,
 	)
+	if c.Proxy != nil {
+		v.Proxy = &vulcanizer.ProxyConfig{
+			Host: c.Proxy.Host,
+			Port: c.Proxy.Port,
+		}
+	}
 	v.Path = c.Path
 	v.Auth = &vulcanizer.Auth{User: c.User, Password: c.Password}
 

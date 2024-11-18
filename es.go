@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/jeremywohl/flatten"
 	"github.com/parnurzeal/gorequest"
 	"github.com/tidwall/gjson"
+	"golang.org/x/net/proxy"
 )
 
 // Hold the values for what values are in the cluster.allocation.exclude settings.
@@ -28,6 +30,11 @@ type Auth struct {
 	Password string
 }
 
+type ProxyConfig struct {
+	Host string
+	Port int
+}
+
 // Hold connection information to a Elasticsearch cluster.
 type Client struct {
 	Host      string
@@ -36,6 +43,7 @@ type Client struct {
 	Path      string
 	TLSConfig *tls.Config
 	Timeout   time.Duration
+	Proxy     *ProxyConfig
 	*Auth
 }
 
@@ -404,7 +412,25 @@ func (s ShardOverlap) isReplicaShard(shard Shard) bool {
 }
 
 func (c *Client) getAgent(method, path string) *gorequest.SuperAgent {
+	var dialer proxy.Dialer
+	var err error
+
+	if c.Proxy != nil && c.Proxy.Host != "" {
+		// If proxy configuration is defined, set up the SOCKS5 proxy
+		socks5Proxy := fmt.Sprintf("%s:%d", c.Proxy.Host, c.Proxy.Port) // Use Host and Port from ProxyConfig
+		dialer, err = proxy.SOCKS5("tcp", socks5Proxy, nil, proxy.Direct)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		// Fallback to direct connection if no proxy is defined
+		dialer = proxy.Direct
+	}
+
+	transport := &http.Transport{Dial: dialer.Dial}
+
 	agent := gorequest.New().Set("Accept", "application/json").Set("Content-Type", "application/json")
+	agent.Transport = transport
 	agent.Method = method
 
 	var protocol string
